@@ -2,7 +2,7 @@
 
 > **IMPORTANT**: This repository uses Git LFS for large files including training data and model outputs. To clone without downloading large files (saving bandwidth and storage), use:
 > ```
-> GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/your-username/contrastive-learning-for-eda.git
+> GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/fblacutt/contrastive-learning-for-eda.git
 > ```
 > You can selectively download LFS files later with `git lfs pull -I "path/to/file"` if needed.
 
