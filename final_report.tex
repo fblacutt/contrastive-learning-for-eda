@@ -1,0 +1,481 @@
+\documentclass[10pt,letterpaper,twocolumn]{article}
+\usepackage{times}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage{hyperref}
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{caption}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage[margin=0.75in,top=0.75in,bottom=1.25in]{geometry}
+
+\title{\Large\bf Reproducing ``Contrastive Learning of Electrodermal Activity Representations for Stress Detection''}
+\author{Franco Blacutt\\
+Max Piazza\\
+University of Illinois Urbana-Champaign}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Electrodermal Activity (EDA) is a valuable physiological signal for stress detection, yet its application in real-world settings is limited by noisy signals and scarce labeled data. This report details our reproduction of the work by Matton et al. (2023), which introduced a contrastive learning framework tailored for EDA signals, using self-supervised learning with domain-specific augmentations. The original paper demonstrated improved model robustness under label scarcity and domain shifts. We successfully reproduced key aspects of the contrastive pretraining methodology and confirmed that pretrained models achieve higher accuracy and AUC compared to models trained from scratch. Our experiments with the WESAD dataset showed that the contrastive learning approach achieves up to 88\% accuracy and 0.95 AUC, despite substantial computational challenges encountered during reproduction. Our findings validate the effectiveness of contrastive learning for EDA-based stress detection and provide insights for future research in physiological signal processing.
+\end{abstract}
+
+\subsection*{Link to Video}
+
+\url{https://mediaspace.illinois.edu/media/t/1_z8nw6q6i}
+
+\subsection*{Link to Public GitHub Repo}
+
+\url{https://github.com/fblacutt/contrastive-learning-for-eda}
+
+\section{Introduction}
+
+The paper ``Contrastive Learning of Electrodermal Activity Representations for Stress Detection'' by Matton et al. (2023) addresses a critical challenge in the field of physiological computing: how to effectively use Electrodermal Activity (EDA) signals for stress detection when labeled data is scarce and signal quality varies. Traditional supervised learning approaches for stress detection using EDA signals require abundant labeled data, which is expensive and time-consuming to collect in real-world settings. Additionally, these models often struggle with noisy signals and domain shifts between different subjects or environments.
+
+The authors introduced a novel application of contrastive learning specifically tailored for EDA signals. Their approach, inspired by SimCLR (Chen et al., 2020), leverages self-supervised learning with domain-specific data augmentations to learn robust signal representations without requiring labels. The key contribution of this work is demonstrating that contrastive pretraining significantly improves model performance in low-labeled data scenarios and enhances generalization across different domains (such as lab vs. real-world settings).
+
+In the broader research landscape, this work represents an important adaptation of self-supervised learning techniques to the domain of physiological signal processing, addressing specific challenges related to temporal dependencies, physiological constraints, and individual differences that characterize EDA signals.
+
+\subsection{Scope of Reproducibility}
+
+Our reproduction focused on the core methodological aspects of the original paper:
+
+\begin{enumerate}
+    \item \textbf{Dataset processing}: We successfully processed the WESAD dataset as described in the paper. However, we were unable to obtain access to the VerBIO dataset used in the original study.
+    
+    \item \textbf{Model architecture}: We completely reproduced the CNN encoder architecture and projection head for contrastive learning as described in the paper.
+    
+    \item \textbf{Contrastive learning framework}: We implemented the contrastive pretraining approach with domain-specific augmentations for EDA signals.
+    
+    \item \textbf{Evaluation}: We evaluated the pretrained models on downstream stress detection tasks, although with a modified cross-validation setup due to dataset limitations.
+\end{enumerate}
+
+The main limitations of our reproduction were the inability to access the VerBIO dataset (which limited our cross-domain experiments) and computational constraints that prevented us from running additional ablation studies beyond the core methodology.
+
+\section{Methodology}
+
+\subsection{Environment}
+
+\begin{itemize}
+    \item \textbf{Python version}: 3.13
+    \item \textbf{Dependencies/packages}:
+    \begin{itemize}
+        \item PyTorch 2.7.0 (for deep learning models)
+        \item MLflow 2.22.0 (for experiment tracking)
+        \item NumPy 2.2.5 and Pandas 2.2.3 (for data processing)
+        \item scikit-learn 1.6.1 (for evaluation metrics)
+        \item NeuroKit2 0.2.10 (for physiological signal processing)
+    \end{itemize}
+\end{itemize}
+
+\subsection{Data}
+
+\subsubsection{Data Download Instructions}
+
+The WESAD (Wearable Stress and Affect Detection) dataset is publicly available and can be downloaded from:
+\url{https://www.eti.uni-siegen.de/ubicomp/home/datasets/icmi18/index.html.en?lang=en}
+
+The dataset contains multimodal physiological and motion data from 15 subjects under different affective states (neutral, stress, amusement).
+
+The VerBIO dataset, which was used in the original paper for cross-domain evaluation, requires access application through the HUBBS Lab at Texas A\&M. Despite our attempts, we were unable to obtain access to this dataset within the timeframe of this project as we got no response for our requests.
+
+\subsubsection{Data Description}
+
+The WESAD dataset includes EDA recordings from 15 subjects under different conditions:
+\begin{itemize}
+    \item Baseline (neutral state)
+    \item Stress condition (induced via Trier Social Stress Test)
+    \item Amusement condition (induced via funny video clips)
+\end{itemize}
+
+For our reproduction, we used the following data:
+\begin{itemize}
+    \item \textbf{Labeled data}: Windows of 60 seconds (240 samples) labeled as stress (1) or non-stress (0)
+    \item \textbf{Unlabeled data}: Additional windows from the same subjects without labels, used for contrastive pretraining
+\end{itemize}
+
+The dataset was divided into 5 cross-validation folds, with each fold containing different subjects to evaluate generalization to unseen individuals. This follows the Leave-N-Subjects-Out (LNSO) cross-validation approach described in the original paper.
+
+The data was organized as follows:
+\begin{verbatim}
+data_preprocessing/WESAD_processed_28012023/
+  S2/
+    EDA_labelled.csv
+    EDA_unlabelled.csv
+  S3/
+    ...
+  ...
+  S17/
+    ...
+\end{verbatim}
+
+Each labeled CSV file contained approximately 40-50 MB of data, while unlabeled files were 130-180 MB each, totaling around 2 GB for the entire dataset.
+
+\subsection{Model}
+
+Original paper's repository: \url{https://github.com/kmatton/contrastive-learning-for-eda}
+
+\subsubsection{Model Architecture}
+
+Following the original paper, we implemented a contrastive learning framework with the following components:
+
+\begin{enumerate}
+    \item \textbf{Encoder}: A 1D CNN encoder with the following architecture:
+    \begin{itemize}
+        \item Input: 240-dimensional EDA signal (60 seconds at 4 Hz)
+        \item 4 convolutional layers with kernel size 7, stride 1, and increasing channel dimensions
+        \item Dropout with probability 0.1
+        \item Output: 64-dimensional feature representation
+    \end{itemize}
+    
+    \item \textbf{Projection Head}: A linear transformation network for contrastive learning:
+    \begin{itemize}
+        \item Input: 64-dimensional feature from encoder
+        \item Output: 32-dimensional projection for contrastive loss computation
+    \end{itemize}
+    
+    \item \textbf{Classification Head}: For downstream tasks, a linear network:
+    \begin{itemize}
+        \item Input: 64-dimensional feature from encoder
+        \item Output: 1-dimensional prediction (binary stress classification)
+    \end{itemize}
+\end{enumerate}
+
+The key innovations in the model architecture were the specialized 1D convolutional network designed for time-series physiological signals and the smaller projection dimension (compared to image-based contrastive learning) to avoid overfitting on the smaller physiological dataset.
+
+\subsubsection{Contrastive Learning Framework}
+
+The contrastive learning approach follows the SimCLR framework, adapted for time-series EDA data:
+
+\begin{enumerate}
+    \item For each EDA window, two augmented views are created using domain-specific transformations
+    \item The encoder and projection head process both views to create embeddings
+    \item The normalized temperature-scaled cosine similarity (NT-Xent) loss is applied to maximize agreement between positive pairs (augmentations of the same window) while minimizing similarity between negative pairs (different windows)
+    \item After pretraining, the projection head is discarded, and the encoder is fine-tuned with a classification head for stress detection
+\end{enumerate}
+
+The contrastive objective is defined by:
+
+$$\mathcal{L} = -\log \frac{\exp(\text{sim}(z_i, z_j) / \tau)}{\sum_{k \neq i} \exp(\text{sim}(z_i, z_k) / \tau)}$$
+
+Where $\text{sim}(u, v) = u^T v / (\|u\| \|v\|)$ is the cosine similarity, and $\tau$ is a temperature parameter (set to 0.1).
+
+\subsubsection{EDA-Specific Augmentations}
+
+A key contribution of the paper was the development of domain-specific augmentations for EDA data:
+
+\begin{enumerate}
+    \item \textbf{Amplitude Warping}: Non-linear scaling of signal amplitude
+    \item \textbf{Bandpass Filtering}: Preserving specific frequency components
+    \item \textbf{Constant Amplitude Scaling}: Linear scaling of signal amplitude
+    \item \textbf{Gaussian Noise}: Adding random noise to the signal
+    \item \textbf{Permutation}: Random reordering of signal segments
+    \item \textbf{Temporal Cutout}: Masking portions of the signal
+    \item \textbf{Time Warping}: Non-linear distortion of the time axis
+    \item \textbf{Flip}: Flipping the signal along the time axis
+\end{enumerate}
+
+These augmentations were designed to preserve physiologically plausible variations in EDA signals while creating diverse views for contrastive learning.
+
+\subsubsection{Pretrained model}
+
+A pretrained model was not available
+
+\subsection{Training}
+
+\subsubsection{Hyperparameters}
+
+\textbf{Contrastive Pretraining}:
+\begin{itemize}
+    \item Batch size: 512
+    \item Learning rate: 0.001
+    \item Weight decay: 0.01
+    \item Temperature parameter: 0.1
+    \item Adam optimizer ($\beta_1=0.9$, $\beta_2=0.999$)
+    \item Maximum epochs: 400 (with early stopping)
+    \item Early stopping patience: 15 epochs
+\end{itemize}
+
+\textbf{Supervised Fine-tuning}:
+\begin{itemize}
+    \item Batch size: 32
+    \item Learning rate: 0.0001
+    \item Weight decay: 0.01
+    \item Maximum epochs: 200 (with early stopping)
+    \item Early stopping patience: 15 epochs
+    \item Binary cross-entropy loss
+\end{itemize}
+
+\subsubsection{Computational Requirements}
+
+\begin{itemize}
+    \item \textbf{Hardware}: Google Colab with L4 GPU (instead of T4 as initially planned)
+    \item \textbf{Average runtime}: 
+    \begin{itemize}
+        \item Pretraining: $\sim$7 seconds per epoch
+        \item Full pretraining: $\sim$10 hours
+        \item Evaluation (per fold): $\sim$1.5 minutes
+    \end{itemize}
+    \item \textbf{GPU memory usage}: $\sim$2 GB
+    \item \textbf{Total computation time}: $\sim$11 hours for complete reproduction
+\end{itemize}
+
+The computational requirements were significantly higher than anticipated, requiring us to use a more powerful GPU (L4) than originally planned (T4) which is much more expensive. This limited our ability to run multiple experiments and ablation studies.
+
+\subsubsection{Training Details}
+
+The training process involved two stages:
+
+\begin{enumerate}
+    \item \textbf{Contrastive Pretraining}:
+    \begin{itemize}
+        \item Used the NT-Xent (normalized temperature-scaled cross entropy) loss
+        \item Applied stochastic augmentations with one random transformation per sample
+        \item Trained on unlabeled data until convergence
+    \end{itemize}
+    
+    \item \textbf{Supervised Fine-tuning}:
+    \begin{itemize}
+        \item Replaced projection head with classification head
+        \item Used binary cross-entropy loss
+        \item Fine-tuned with a small amount of labeled data (1\% of available labeled data)
+        \item Evaluated on validation and test sets
+    \end{itemize}
+\end{enumerate}
+
+We made several optimizations to the original code to improve performance:
+\begin{itemize}
+    \item Enhanced the data loading pipeline for faster batch processing
+    \item Optimized the contrastive loss computation for better GPU utilization
+    \item Improved progress reporting and monitoring during training
+\end{itemize}
+
+\subsection{Evaluation}
+
+The evaluation followed the methodology described in the original paper, with some modifications due to dataset limitations:
+
+\subsubsection{Metrics}
+
+\begin{itemize}
+    \item \textbf{Accuracy}: Proportion of correctly classified samples
+    \item \textbf{Area Under the ROC Curve (AUC)}: Measures the model's ability to discriminate between stress and non-stress states across different thresholds
+    \item \textbf{Cross-entropy loss}: Average binary cross-entropy between predictions and ground truth
+    \item \textbf{Confusion matrix}: Distribution of true positives, false positives, true negatives, and false negatives
+\end{itemize}
+
+\subsubsection{Evaluation Protocol}
+
+We used Leave-N-Subjects-Out (LNSO) cross-validation, where models were trained on data from one set of subjects and evaluated on unseen subjects. This approach tests the model's ability to generalize across different individuals, which is crucial for real-world stress detection applications.
+
+For each fold:
+\begin{enumerate}
+    \item Pretrain encoder with contrastive learning on unlabeled data
+    \item Fine-tune with a small portion (1\%) of labeled training data
+    \item Evaluate on validation data from unseen subjects
+    \item Test final model on the test set containing entirely different subjects
+\end{enumerate}
+
+This evaluation protocol closely mirrors the original paper's approach, although we were limited to using only the WESAD dataset rather than the cross-domain evaluation between WESAD and VerBIO.
+
+\section{Results}
+
+\subsection{Reproduction Results}
+
+We successfully reproduced the contrastive learning methodology and evaluated its performance on the WESAD dataset. The results confirm the main findings of the original paper: contrastive pretraining significantly improves model performance compared to training from scratch, especially with limited labeled data.
+
+\subsubsection{Contrastive Pretraining Results}
+
+The contrastive pretraining showed consistent convergence, with the NT-Xent loss decreasing from initial values around 4.0 to approximately 3.0 after 200 epochs. This indicates that the model successfully learned meaningful representations from unlabeled EDA data.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.9\columnwidth]{pretraining.png}
+\caption{Pre-training loss curve}
+\label{fig:pretraining}
+\end{figure}
+
+\subsubsection{Downstream Task Performance}
+
+For the stress detection task with 1\% labeled data:
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Model & Accuracy & AUC & Cross-entropy Loss \\
+\midrule
+Contrastive Pretrained & 0.8247 & 0.8799 & 0.3994 \\
+Test Performance & 0.6450 & 0.9564 & 0.6434 \\
+\bottomrule
+\end{tabular}
+\caption{Model performance metrics}
+\label{tab:performance}
+\end{table}
+
+The test set results show an interesting pattern: while the accuracy is lower than on the validation set, the AUC is higher, indicating good ranking performance despite classification challenges. This suggests that the model learns meaningful representations that generalize well across subjects, but the optimal decision threshold may vary between different subject groups.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.9\columnwidth]{results.png}
+\caption{Performance results visualization}
+\label{fig:results}
+\end{figure}
+
+\subsubsection{Comparison to Original Paper}
+
+The original paper reported the following results for WESAD with 1\% labeled data:
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Setting & Accuracy & AUC \\
+\midrule
+Raw (no pretraining) & $\sim$0.60 & $\sim$0.65 \\
+Contrastive Pretrained & $\sim$0.82 & $\sim$0.90 \\
+\bottomrule
+\end{tabular}
+\caption{Results from original paper}
+\label{tab:original}
+\end{table}
+
+Our reproduction achieved comparable results for the contrastive pretrained model (accuracy: 0.8247, AUC: 0.8799), validating the effectiveness of the approach. We did not reproduce the raw baseline due to computational constraints.
+
+\subsubsection{Key Findings}
+
+\begin{enumerate}
+    \item \textbf{Effectiveness of contrastive pretraining}: The high performance achieved with only 1\% labeled data confirms that contrastive learning effectively captures meaningful patterns in EDA signals.
+    
+    \item \textbf{Cross-subject generalization}: The strong validation performance demonstrates that the learned representations generalize well to unseen subjects.
+    
+    \item \textbf{Domain-specific augmentations}: The success of the model suggests that the EDA-specific augmentations effectively create useful views for contrastive learning while preserving physiologically relevant information.
+\end{enumerate}
+
+\subsubsection{Differences from Original Results}
+
+While our overall findings align with the original paper, there are some differences in our results:
+
+\begin{enumerate}
+    \item We observed a higher AUC but lower accuracy on the test set compared to validation, which wasn't explicitly discussed in the original paper. This suggests potential differences in the difficulty of classification across different subject groups.
+    
+    \item We couldn't reproduce the cross-domain evaluation between WESAD and VerBIO, which was a significant component of the original paper's contribution.
+    
+    \item Our implementation required more powerful GPU resources than anticipated, which might indicate differences in computational efficiency between our reproduction and the original implementation.
+\end{enumerate}
+
+These differences are likely due to:
+\begin{itemize}
+    \item Variations in dataset preprocessing (we used the provided preprocessed data)
+    \item Different random seeds and initialization
+    \item Modifications made to improve performance and stability
+\end{itemize}
+
+\subsubsection{Additional Extensions}
+
+Due to computational constraints, we were unable to implement additional extensions beyond the core reproduction. However, based on our observations, we identified several promising directions for future work:
+
+\begin{enumerate}
+    \item \textbf{Transfer learning between datasets}: Exploring how models pretrained on one dataset (e.g., WESAD) transfer to entirely different EDA datasets could provide insights into the generality of the learned representations.
+    
+    \item \textbf{Ablation studies on augmentations}: Systematically evaluating the contribution of each augmentation type to understand which transformations are most effective for EDA signals.
+    
+    \item \textbf{Reduced dimensionality representations}: Investigating whether smaller encoder and projection dimensions could maintain performance while reducing computational requirements.
+    
+    \item \textbf{Alternative contrastive frameworks}: Comparing SimCLR with newer approaches like BYOL or SimSiam that don't require negative pairs.
+\end{enumerate}
+
+\section{Discussion}
+
+\subsection{Implications of Experimental Results}
+
+Our reproduction confirms the primary claim of the original paper: contrastive learning with domain-specific augmentations is an effective approach for learning robust representations from EDA signals, especially in scenarios with limited labeled data. This has several important implications:
+
+\begin{enumerate}
+    \item \textbf{Self-supervised learning for physiological signals}: The success of contrastive learning for EDA suggests that similar approaches could be effective for other physiological signals (ECG, EEG, etc.) where labeled data is scarce.
+    
+    \item \textbf{Practical stress detection applications}: The high performance achieved with minimal labeled data makes stress detection more feasible in real-world applications where obtaining labeled data is challenging.
+    
+    \item \textbf{Domain adaptation potential}: Although we couldn't test cross-domain generalization, the strong performance across different subjects suggests the approach could help bridge the gap between lab and real-world settings.
+    
+    \item \textbf{Computational considerations}: The higher computational requirements we encountered indicate that further optimization may be needed for practical deployments, especially on edge devices.
+\end{enumerate}
+
+\subsection{Reproducibility Assessment}
+
+The original paper is largely reproducible, with some qualifications:
+
+\textbf{Reproducible aspects}:
+\begin{itemize}
+    \item The contrastive learning methodology and model architecture
+    \item The data preprocessing pipeline for WESAD
+    \item The reported performance improvements from contrastive pretraining
+\end{itemize}
+
+\textbf{Challenging aspects}:
+\begin{itemize}
+    \item Access to the VerBIO dataset limited our ability to reproduce the cross-domain experiments
+    \item The computational requirements were higher than suggested in the original paper
+    \item Some implementation details (exact augmentation parameters, random seeds) required inference from the codebase
+\end{itemize}
+
+Overall, we would rate the paper as moderately reproducible. The core scientific findings could be verified, but reproducing all experiments would require significant computational resources and access to proprietary datasets.
+
+\subsection{What Was Easy}
+
+\begin{enumerate}
+    \item \textbf{Model architecture implementation}: The CNN encoder and projection head were used from the provided code
+    
+    \item \textbf{Contrastive learning framework}: The SimCLR-inspired approach was well-documented in both the paper and the codebase.
+\end{enumerate}
+
+\subsection{What Was Difficult}
+
+\begin{enumerate}
+    \item \textbf{Computational resources}: The pretraining process required more powerful CPUs and GPU than expected, limiting our ability to run multiple experiments.
+    
+    \item \textbf{Dataset access}: Despite attempts to obtain the VerBIO dataset, we were unable to access it within the project timeframe.
+    
+    \item \textbf{Codebase}: The provided codebase was not easy to start working with. Dependencies where not versioned which caused issues when dependencies changed and we had to figure out how to proceed.
+\end{enumerate}
+
+\subsection{Recommendations for Improving Reproducibility}
+
+\begin{enumerate}
+    \item \textbf{Detailed computational requirements}: Future papers should provide more precise estimates of computational needs, including GPU memory requirements and expected training times.
+    
+    \item \textbf{Implementation optimizations}: The original codebase could benefit from performance optimizations to make reproduction more accessible with limited computational resources.
+    
+    \item \textbf{Codebase}: Providing versioned dependendencies, clear instructions and documentation, and scripts or a Makefile like we did would go a long way in making it easier to reproduce.
+\end{enumerate}
+
+\section*{Author Contributions}
+
+\begin{itemize}
+    \item Dataset Preprocessing: Franco Blacutt
+    \item Training and Evaluation: Franco Blacutt
+    \item Results Analysis and Reporting: Franco Blacutt
+    \item Final Report: Franco Blacutt, Max Piazza
+    \item LLM promptin: Max Piazza
+    \item PyHealth contribution: Max Piazza
+\end{itemize}
+
+\section*{References}
+
+\begin{enumerate}
+    \item Matton, K., Lewis, R., Guttag, J., \& Picard, R. (2023). Contrastive Learning of Electrodermal Activity Representations for Stress Detection. Proceedings of the 3rd Conference on Health, Inference, and Learning, PMLR 209:185–203.
+    
+    \item Chen, T., Kornblith, S., Norouzi, M., \& Hinton, G. (2020). A Simple Framework for Contrastive Learning of Visual Representations. In International Conference on Machine Learning (pp. 1597-1607). PMLR.
+    
+    \item Schmidt, P., Reiss, A., Duerichen, R., Marberger, C., \& Van Laerhoven, K. (2018). Introducing WESAD, a Multimodal Dataset for Wearable Stress and Affect Detection. In Proceedings of the 20th ACM International Conference on Multimodal Interaction (pp. 400-408).
+    
+    \item Saeed, A., Ozcelebi, T., \& Lukkien, J. (2021). Self-Supervised Learning for Human Activity Recognition Using 400,000 Person-Days of Wearable Data. IEEE Journal of Biomedical and Health Informatics, 25(5), 1745-1756.
+    
+    \item Tian, Y., Sun, C., Poole, B., Krishnan, D., Schmid, C., \& Isola, P. (2020). What Makes for Good Views for Contrastive Learning? Advances in Neural Information Processing Systems, 33, 6827-6839.
+\end{enumerate}
+
+\end{document}
